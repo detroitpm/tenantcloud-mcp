@@ -1,0 +1,25 @@
+{
+  "name": "mercury-mcp",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local MCP server for managing Mercury bank recipients from Claude. Deliberately has no payment tools.",
+  "type": "module",
+  "bin": {
+    "mercury-mcp": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.15.0",
+    "@napi-rs/keyring": "^1.1.0",
+    "zod": "^3.25.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
