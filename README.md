@@ -56,7 +56,7 @@ await tasks.create({ title: "Call plumber" });
 Build from this repo. **Never `npx tc-mcp`**: that npm name is an unrelated project. Needs Node.js 20+ (LTS from nodejs.org). **Windows:** Download ZIP, extract, double-click `setup-windows.cmd` (no Git needed). **Mac:**
 
 ```bash
-git clone https://github.com/detroitsection8/tenantcloud-mcp.git ~/tools/tenantcloud-mcp
+git clone https://github.com/detroitpm/tenantcloud-mcp.git ~/tools/tenantcloud-mcp
 bash ~/tools/tenantcloud-mcp/setup.sh
 ```
 

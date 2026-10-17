@@ -32,7 +32,7 @@ You don't need Git.
 Open Terminal and paste these two commands, one at a time:
 
 ```bash
-git clone https://github.com/detroitsection8/tenantcloud-mcp.git ~/tools/tenantcloud-mcp
+git clone https://github.com/detroitpm/tenantcloud-mcp.git ~/tools/tenantcloud-mcp
 ```
 
 ```bash
