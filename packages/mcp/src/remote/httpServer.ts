@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { rateLimit } from "express-rate-limit";
-import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
@@ -35,6 +35,10 @@ interface McpSession {
 export function createRemoteApp(options: RemoteAppOptions): express.Express {
   const { store, vaultKey, adminKey } = options;
   const issuerUrl = new URL(options.baseUrl);
+  // The protected resource is the /mcp endpoint, not the site root. Clients
+  // (claude.ai) check that the advertised resource matches the URL they were
+  // given and silently stop before registering if it does not.
+  const resourceUrl = new URL("/mcp", issuerUrl);
   const provider = new VaultOAuthProvider(store);
   const sessions = new Map<string, McpSession>();
 
@@ -56,6 +60,7 @@ export function createRemoteApp(options: RemoteAppOptions): express.Express {
     mcpAuthRouter({
       provider,
       issuerUrl,
+      resourceServerUrl: resourceUrl,
       scopesSupported: [TC_SCOPE],
       resourceName: "TenantCloud MCP",
     }),
@@ -147,7 +152,10 @@ export function createRemoteApp(options: RemoteAppOptions): express.Express {
   });
 
   // The protected MCP endpoint.
-  const bearer = requireBearerAuth({ verifier: provider });
+  const bearer = requireBearerAuth({
+    verifier: provider,
+    resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resourceUrl),
+  });
   app.all("/mcp", bearer, async (req: Request, res: Response) => {
     const userId = (req.auth?.extra as { userId?: number } | undefined)?.userId;
     if (typeof userId !== "number") {
