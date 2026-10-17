@@ -199,4 +199,134 @@ export function registerFinancialsTools(server: McpServer, client: TcClient, cac
       }
     },
   );
+
+  // The company's own P&L, as TenantCloud's operating statement reports it: company-level
+  // lines (no property) plus the management fees charged to every property.
+  server.registerTool(
+    "company_pnl",
+    {
+      description:
+        "Read-only. The property manager's own profit and loss for a date range, from TenantCloud's operating " +
+        "statement: every company-level line (not tied to a property, e.g. General Expense: Software, Salary) and " +
+        "every Management fees line charged to owners' properties. amountDue is billed, amountPaid is paid.",
+      inputSchema: {
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("First date, YYYY-MM-DD"),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Last date, YYYY-MM-DD"),
+        basis: z.enum(["cash", "accrual"]).optional().describe("Accounting basis (default cash)"),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ startDate, endDate, basis }) => {
+      try {
+        type Report = {
+          data?: Array<{ attributes?: Record<string, unknown> }>;
+          meta?: { cursor?: { next?: string | null } };
+        };
+        const rows: Record<string, unknown>[] = [];
+        let cursor = "";
+        // property_id 0 means every property plus company-level lines; the report pages by cursor.
+        for (let page = 0; page < 100; page++) {
+          const raw = (await client.request("GET", "/reports/transactions/operating_statement", {
+            query: {
+              cursor,
+              "filter[property_id]": 0,
+              "filter[op_type]": basis ?? "cash",
+              "filter[date][gte]": startDate,
+              "filter[date][lte]": endDate,
+            },
+          })) as Report;
+          for (const item of raw.data ?? []) {
+            const a = item.attributes ?? {};
+            const company = a["property_id"] == null;
+            if (!company && a["account_category"] !== "Management fees") continue;
+            rows.push(
+              compact({
+                scope: company ? "company" : "property",
+                type: a["category"],
+                category: a["account_category"],
+                subCategory: a["account_sub_category"] || undefined,
+                accountId: a["account_id"],
+                propertyId: a["property_id"] ?? undefined,
+                amountDue: Number(a["amount_due"] ?? 0),
+                amountPaid: Number(a["amount_paid"] ?? 0),
+              }),
+            );
+          }
+          const next = raw.meta?.cursor?.next;
+          if (!next) break;
+          cursor = next;
+        }
+        return toolSuccess({ rows, count: rows.length, startDate, endDate, basis: basis ?? "cash" });
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  );
+
+  // Read-only and GET-only, so a dashboard can be granted it without also
+  // getting tc_request's write and delete access.
+  server.registerTool(
+    "list_transactions_by_account",
+    {
+      description:
+        "Read-only. Every transaction for the given account IDs (e.g. management fee sub-accounts) dated " +
+        "between startDate and endDate inclusive, newest first. Voided transactions are left out.",
+      inputSchema: {
+        accountIds: z.array(z.number().int()).min(1).max(50).describe("Account IDs to include"),
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("First date, YYYY-MM-DD"),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Last date, YYYY-MM-DD"),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ accountIds, startDate, endDate }) => {
+      try {
+        const filters = accountIds.map((id) => `filter[account_id][]=${id}`).join("&");
+        type Page = {
+          data?: Array<{ id?: string; attributes?: Record<string, unknown> }>;
+          meta?: { pagination?: { total_pages?: number } };
+        };
+        const fetchPage = (page: number) =>
+          client.request("GET", `/transactions?${filters}&sort=-date,-id&page=${page}`) as Promise<Page>;
+
+        const rows: Record<string, unknown>[] = [];
+        let page = 1;
+        let totalPages = 1;
+        let reachedStart = false;
+        // TenantCloud has no date filter here and pages are fixed at 20 rows, so walk
+        // newest-first, four pages at a time, until a page ends before startDate.
+        while (!reachedStart && page <= totalPages && page <= 400) {
+          const batch = await Promise.all(
+            [0, 1, 2, 3].filter((i) => page + i <= totalPages || page === 1).map((i) => fetchPage(page + i)),
+          );
+          for (const raw of batch) {
+            totalPages = raw.meta?.pagination?.total_pages ?? totalPages;
+            const items = raw.data ?? [];
+            for (const item of items) {
+              const a = item.attributes ?? {};
+              const date = String(a["date"] ?? "").slice(0, 10);
+              if (date < startDate) reachedStart = true;
+              if (date < startDate || date > endDate || a["void_at"]) continue;
+              rows.push(
+                compact({
+                  id: Number(item.id),
+                  date,
+                  accountId: a["account_id"],
+                  propertyId: a["property_id"],
+                  amount: Number(a["amount"] ?? 0),
+                  paid: Number(a["paid"] ?? 0),
+                  balance: Number(a["balance"] ?? 0),
+                  paidAt: a["paid_at"] ? String(a["paid_at"]).slice(0, 10) : undefined,
+                }),
+              );
+            }
+            if (items.length === 0) reachedStart = true;
+          }
+          page += batch.length;
+        }
+        return toolSuccess({ rows, count: rows.length, startDate, endDate });
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  );
 }

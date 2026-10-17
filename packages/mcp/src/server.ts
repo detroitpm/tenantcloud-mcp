@@ -131,6 +131,7 @@ export function createServer(client: TcClient, options: ServerOptions = {}): Mcp
     {
       description: "List rental properties from TenantCloud.",
       inputSchema: { maxResults: maxResultsParam },
+      annotations: { readOnlyHint: true },
     },
     async ({ maxResults }) => {
       try {
