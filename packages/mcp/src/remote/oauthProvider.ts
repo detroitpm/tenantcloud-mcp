@@ -72,7 +72,7 @@ function loginPage(fields: Record<string, string>, error?: string): string {
   .error { color: #b91c1c; font-size: 0.9rem; margin-top: 1rem; }
 </style></head>
 <body>
-  <form method="post" action="authorize/login">
+  <form method="post" action="/authorize/login">
       ${hidden}
       <h1>Sign in to the TenantCloud connector</h1>
       <p style="font-size:0.85rem;color:#666">Use the work email and invite code your administrator gave you.</p>
