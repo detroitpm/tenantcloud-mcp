@@ -171,4 +171,8 @@ export class PgRemoteStore implements RemoteStore {
   async deleteGrant(tokenHash: string): Promise<void> {
     await this.pool.query("DELETE FROM oauth_grants WHERE token_hash = $1", [tokenHash]);
   }
+
+  async deleteGrantsForUser(userId: number): Promise<void> {
+    await this.pool.query("DELETE FROM oauth_grants WHERE user_id = $1", [userId]);
+  }
 }

@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
-import express, { type Request, type Response } from "express";
+import express, { type NextFunction, type Request, type Response } from "express";
+import { rateLimit } from "express-rate-limit";
 import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { TcClient } from "tenantcloud-client";
 import { createServer } from "../server.js";
-import { randomInviteCode, sha256hex } from "./crypto.js";
+import { randomInviteCode, safeEqual, sha256hex } from "./crypto.js";
 import { VaultOAuthProvider, TC_SCOPE } from "./oauthProvider.js";
 import type { RemoteStore } from "./store.js";
 import { sealTokenSet, VaultTokenProvider } from "./vaultTokenProvider.js";
@@ -38,6 +39,15 @@ export function createRemoteApp(options: RemoteAppOptions): express.Express {
   const sessions = new Map<string, McpSession>();
 
   const app = express();
+  // Railway (and most hosts) sit one proxy hop in front; trust it so rate
+  // limits key on the real client IP instead of lumping everyone together.
+  app.set("trust proxy", 1);
+  app.use((_req: Request, res: Response, next: NextFunction) => {
+    // The login page must never be framed by another site (clickjacking).
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
+    next();
+  });
   app.use(express.json({ limit: "4mb" }));
   app.use(express.urlencoded({ extended: false }));
 
@@ -51,8 +61,18 @@ export function createRemoteApp(options: RemoteAppOptions): express.Express {
     }),
   );
 
+  // Invite codes are the only secret on these two routes, so cap guessing.
+  const credentialLimiter = rateLimit({
+    windowMs: 15 * 60_000,
+    limit: 20,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+    message: { error: "too many attempts; try again in 15 minutes" },
+  });
+  const isAdmin = (req: Request) => safeEqual(req.headers.authorization ?? "", `Bearer ${adminKey}`);
+
   // Login form submission (the page rendered by provider.authorize()).
-  app.post("/authorize/login", async (req: Request, res: Response) => {
+  app.post("/authorize/login", credentialLimiter, async (req: Request, res: Response) => {
     const body = req.body as Record<string, string | undefined>;
     const result = await provider.completeLogin({
       email: body["email"] ?? "",
@@ -70,7 +90,7 @@ export function createRemoteApp(options: RemoteAppOptions): express.Express {
   });
 
   // Pairing: upload a TenantCloud token set obtained via local browser login.
-  app.post("/pair", async (req: Request, res: Response) => {
+  app.post("/pair", credentialLimiter, async (req: Request, res: Response) => {
     const body = req.body as Record<string, string | undefined>;
     const { email, code, accessToken, refreshToken, fingerprint } = body;
     if (!email || !code || !accessToken || !refreshToken || !fingerprint) {
@@ -87,8 +107,8 @@ export function createRemoteApp(options: RemoteAppOptions): express.Express {
   });
 
   // Admin: invite (or re-invite) a teammate. Returns the invite code ONCE.
-  app.post("/admin/invite", async (req: Request, res: Response) => {
-    if (req.headers.authorization !== `Bearer ${adminKey}`) {
+  app.post("/admin/invite", credentialLimiter, async (req: Request, res: Response) => {
+    if (!isAdmin(req)) {
       res.status(401).json({ error: "admin key required" });
       return;
     }
@@ -103,8 +123,8 @@ export function createRemoteApp(options: RemoteAppOptions): express.Express {
   });
 
   // Admin: revoke a teammate's pairing (their TenantCloud tokens).
-  app.post("/admin/revoke", async (req: Request, res: Response) => {
-    if (req.headers.authorization !== `Bearer ${adminKey}`) {
+  app.post("/admin/revoke", credentialLimiter, async (req: Request, res: Response) => {
+    if (!isAdmin(req)) {
       res.status(401).json({ error: "admin key required" });
       return;
     }
@@ -115,6 +135,8 @@ export function createRemoteApp(options: RemoteAppOptions): express.Express {
       return;
     }
     await store.deleteVault(user.id);
+    // Sign them out of Claude right away, not when their token expires.
+    await store.deleteGrantsForUser(user.id);
     // Rotate the invite code hash so existing code can no longer pair or sign in.
     await store.upsertUser(user.email, sha256hex(randomInviteCode()));
     res.status(200).json({ revoked: true, email: user.email });

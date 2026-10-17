@@ -50,6 +50,8 @@ export interface RemoteStore {
   saveGrant(tokenHash: string, record: GrantRecord): Promise<void>;
   getGrant(tokenHash: string): Promise<GrantRecord | null>;
   deleteGrant(tokenHash: string): Promise<void>;
+  /** Removes every access and refresh token issued to a user (offboarding). */
+  deleteGrantsForUser(userId: number): Promise<void>;
 }
 
 export class MemoryRemoteStore implements RemoteStore {
@@ -137,6 +139,15 @@ export class MemoryRemoteStore implements RemoteStore {
 
   deleteGrant(tokenHash: string): Promise<void> {
     this.grants.delete(tokenHash);
+    return Promise.resolve();
+  }
+
+  deleteGrantsForUser(userId: number): Promise<void> {
+    for (const [hash, grant] of this.grants) {
+      if (grant.userId === userId) {
+        this.grants.delete(hash);
+      }
+    }
     return Promise.resolve();
   }
 }

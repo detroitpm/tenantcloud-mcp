@@ -87,8 +87,11 @@ from the repo at **github.com/settings/installations**).
 
 ## 2. Invite a teammate (admin)
 
+These commands run the team copy of the connector built by `setup.sh` (see
+TEAM-SETUP.md). **Never use `npx tc-mcp`**: that npm name is an unrelated package.
+
 ```bash
-TC_ADMIN_KEY=<your admin key> npx tc-mcp invite alice@yourco.com --server https://<your-app>.up.railway.app
+TC_ADMIN_KEY=<your admin key> node ~/tools/tenantcloud-mcp/packages/mcp/dist/cli.js invite alice@yourco.com --server https://<your-app>.up.railway.app
 ```
 
 This prints a one-time invite code and ready-to-send instructions. The invite
@@ -101,7 +104,7 @@ re-running `invite` for the same email rotates the code.
    TenantCloud account):
 
    ```bash
-   npx tc-mcp login --remote https://<your-app>.up.railway.app --email alice@yourco.com --code XXXX-XXXX
+   node ~/tools/tenantcloud-mcp/packages/mcp/dist/cli.js login --remote https://<your-app>.up.railway.app --email alice@yourco.com --code XXXX-XXXX
    ```
 
    This opens the normal TenantCloud browser sign-in (their password, their
@@ -121,8 +124,8 @@ curl -X POST https://<your-app>.up.railway.app/admin/revoke \
   -d '{"email":"alice@yourco.com"}'
 ```
 
-This deletes their TenantCloud tokens from the vault and rotates their invite
-code (so their connector sign-in stops working when their OAuth token expires).
+This deletes their TenantCloud tokens from the vault, rotates their invite
+code, and signs them out of the connector immediately.
 Also remove their sub-admin in TenantCloud itself.
 
 ## Security model
@@ -137,6 +140,14 @@ Also remove their sub-admin in TenantCloud itself.
 - **TenantCloud permissions still apply**: each teammate's tool calls run as
   their own TenantCloud sub-admin, so TenantCloud enforces their role and its
   audit log shows who did what.
+- **Sign-in codes only go to Claude**: open client registration only accepts
+  Claude's callbacks (claude.ai / claude.com) and loopback addresses, so a
+  look-alike client cannot phish an invite code through the real login page.
+  Add other exact callback URLs with `EXTRA_REDIRECT_URIS` (comma-separated).
+- **Guessing is capped**: login, pairing and admin routes allow 20 attempts per
+  IP per 15 minutes. The login page refuses to be framed by other sites.
+- **Revoking is immediate**: `/admin/revoke` also deletes the teammate's Claude
+  sign-in tokens, so the connector stops working for them at once.
 - **Single instance**: run one replica. TenantCloud rotates refresh tokens on
   every refresh; the server serializes per-user token operations in-process,
   which is only safe with a single instance.

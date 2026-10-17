@@ -44,7 +44,8 @@ export async function serve(): Promise<number> {
 
   setSignInHint(
     "Their TenantCloud connection is missing or expired. They need to re-pair: " +
-      'run "npx tc-mcp login --remote <server-url> --email <their email> --code <their invite code>" on their computer, then retry.',
+      'run "node ~/tools/tenantcloud-mcp/packages/mcp/dist/cli.js login --remote <server-url> --email <their email> --code <their invite code>" on their computer ' +
+      '(from the team copy of the connector; never "npx tc-mcp", which is an unrelated npm package), then retry.',
   );
 
   const app = createRemoteApp({ store, vaultKey, baseUrl, adminKey });

@@ -85,7 +85,8 @@ export async function inviteTeammate(args: string[]): Promise<number> {
   console.log("");
   console.log(`  1. Add the connector in Claude: ${server}/mcp`);
   console.log(`     Sign in with email ${body.email} and invite code ${body.inviteCode}`);
-  console.log(`  2. Pair your TenantCloud account (one time, on your computer):`);
-  console.log(`     npx tc-mcp login --remote ${server} --email ${body.email} --code ${body.inviteCode}`);
+  console.log(`  2. Pair your TenantCloud account (one time, on your computer, after running setup.sh from TEAM-SETUP.md).`);
+  console.log(`     Never use "npx tc-mcp": that npm name is an unrelated package.`);
+  console.log(`     node ~/tools/tenantcloud-mcp/packages/mcp/dist/cli.js login --remote ${server} --email ${body.email} --code ${body.inviteCode}`);
   return 0;
 }

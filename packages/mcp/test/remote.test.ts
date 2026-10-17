@@ -295,6 +295,45 @@ describe("remote HTTP server", () => {
     expect(names).not.toContain("tc_login");
   });
 
+  it("refuses to register a client whose sign-in callback is not Claude's", async () => {
+    const res = await fetch(`${base}/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_name: "Phisher",
+        redirect_uris: ["https://evil.example.com/callback"],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("redirect_uri not allowed");
+  });
+
+  it("revoking a teammate signs them out of Claude immediately", async () => {
+    await inviteUser("bob@co.com");
+    const bob = (await store.getUserByEmail("bob@co.com"))!;
+    await store.saveGrant(sha256hex("tca_bob"), {
+      userId: bob.id,
+      clientId: "c",
+      kind: "access",
+      expiresAt: Date.now() + 3_600_000,
+    });
+    const before = await fetch(`${base}/mcp`, { headers: { Authorization: "Bearer tca_bob" } });
+    expect(before.status).toBe(400); // authenticated, just not an initialize request
+
+    const revokeRes = await fetch(`${base}/admin/revoke`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${ADMIN_KEY}` },
+      body: JSON.stringify({ email: "bob@co.com" }),
+    });
+    expect(revokeRes.status).toBe(200);
+
+    const after = await fetch(`${base}/mcp`, { headers: { Authorization: "Bearer tca_bob" } });
+    expect(after.status).toBe(401);
+  });
+
   it("hashes invite codes case-insensitively", () => {
     expect(sha256hex("ab")).toBe(sha256hex("ab"));
     expect(sha256hex("AB")).not.toBe(sha256hex("ab"));

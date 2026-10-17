@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 /**
  * Vault encryption: AES-256-GCM, key supplied as 64 hex chars (32 bytes) via
@@ -47,4 +47,9 @@ export function randomInviteCode(): string {
   const pick = () => alphabet[randomBytes(1)[0]! % alphabet.length]!;
   const block = () => pick() + pick() + pick() + pick();
   return `${block()}-${block()}`;
+}
+
+/** Constant-time string comparison (via fixed-length hashes) for shared secrets. */
+export function safeEqual(a: string, b: string): boolean {
+  return timingSafeEqual(createHash("sha256").update(a).digest(), createHash("sha256").update(b).digest());
 }

@@ -7,6 +7,7 @@ import type { OAuthRegisteredClientsStore } from "@modelcontextprotocol/sdk/serv
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import {
+  InvalidClientMetadataError,
   InvalidGrantError,
   InvalidTokenError,
 } from "@modelcontextprotocol/sdk/server/auth/errors.js";
@@ -18,6 +19,32 @@ const ACCESS_TOKEN_TTL_S = 60 * 60; // 1 hour; claude.ai refreshes silently
 const REFRESH_TOKEN_TTL_S = 90 * 24 * 60 * 60;
 
 export const TC_SCOPE = "tenantcloud";
+
+/**
+ * Where sign-in codes may be sent. Registration is open (claude.ai registers
+ * itself), so without this list anyone could register a client pointing at
+ * their own site and phish a teammate's invite code through our real login
+ * page. Allowed: Claude's web callbacks and loopback addresses (Claude Code /
+ * Claude Desktop run a local callback). EXTRA_REDIRECT_URIS (comma-separated,
+ * exact match) adds more.
+ */
+const CLAUDE_CALLBACKS = ["https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback"];
+
+export function isAllowedRedirectUri(uri: string): boolean {
+  const extra = (process.env["EXTRA_REDIRECT_URIS"] ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (CLAUDE_CALLBACKS.includes(uri) || extra.includes(uri)) {
+    return true;
+  }
+  try {
+    const url = new URL(uri);
+    return url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
 
 /** Escape a string for safe interpolation into the login page HTML. */
 function escapeHtml(value: string): string {
@@ -75,6 +102,10 @@ export class VaultOAuthProvider implements OAuthServerProvider {
       },
       async registerClient(client) {
         const full = client as OAuthClientInformationFull;
+        const rejected = full.redirect_uris.filter((uri) => !isAllowedRedirectUri(String(uri)));
+        if (rejected.length > 0) {
+          throw new InvalidClientMetadataError(`redirect_uri not allowed: ${rejected.join(", ")}`);
+        }
         await store.saveClient(full);
         return full;
       },
@@ -127,7 +158,7 @@ export class VaultOAuthProvider implements OAuthServerProvider {
     });
 
     const client = await this.store.getClient(input.clientId);
-    if (!client || !client.redirect_uris.includes(input.redirectUri)) {
+    if (!client || !client.redirect_uris.includes(input.redirectUri) || !isAllowedRedirectUri(input.redirectUri)) {
       return retry("Invalid client or redirect URI.");
     }
 
