@@ -440,6 +440,45 @@ describe("new write paths", () => {
     });
   });
 
+  it.each([
+    ["professional", "https://api.tenantcloud.com/professionals/56"],
+    ["tenant", "https://api.tenantcloud.com/landlord/tenants/56"],
+  ])("updates a %s contact via its role endpoint with a plain body", async (role, expectedUrl) => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: [{ type: "userClient", id: "56", attributes: { role, firstName: "Jane", phone: "" } }],
+          meta: { pagination: { total: 1, current_page: 1, per_page: 12, total_pages: 1 } },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ id: 56, role, firstName: "Jane", phone: "15550001111" }));
+    const client = new TcClient(new StaticTokenProvider("tok"), { fetch: fetchMock });
+
+    const contact = await client.crm.update(56, { phone: "15550001111" });
+
+    expect(contact?.phone1).toBe("15550001111");
+    const [lookupUrl] = fetchMock.mock.calls[0]!;
+    expect(lookupUrl).toBe(`https://api.tenantcloud.com/contacts?${encodeURIComponent("filter[id]")}=56`);
+    const [url, init] = fetchMock.mock.calls[1]!;
+    expect(url).toBe(expectedUrl);
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body as string)).toEqual({ phone: "15550001111" });
+  });
+
+  it("rejects updating a contact whose role has no known update endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: [{ type: "userClient", id: "57", attributes: { role: "owner" } }],
+        meta: { pagination: { total: 1, current_page: 1, per_page: 12, total_pages: 1 } },
+      }),
+    );
+    const client = new TcClient(new StaticTokenProvider("tok"), { fetch: fetchMock });
+
+    await expect(client.crm.update(57, { phone: "1" })).rejects.toThrow("role 'owner'");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("lists files and parses items", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({

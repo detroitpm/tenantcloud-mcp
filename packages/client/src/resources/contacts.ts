@@ -7,7 +7,10 @@
  *
  * Endpoints:
  *   POST   /contacts                 create
- *   GET/PATCH/DELETE /contacts/{id}
+ *   GET    /contacts?filter[id]={id} read one (GET /contacts/{id} 404s)
+ *   PATCH  /landlord/tenants/{id}    update a tenant      - plain body, not JSON:API
+ *   PATCH  /professionals/{id}       update a professional - plain body, not JSON:API
+ *   DELETE /contacts/{id}
  *   POST   /contacts/invite          invite to the tenant portal
  *   GET/POST /contacts/insurances (+ /{id})
  */
@@ -24,12 +27,25 @@ import {
 
 const CONTACT_TYPE = "userClient";
 
+/** Update endpoint per contact role. */
+const UPDATE_PATHS: Record<string, string> = {
+  tenant: "/landlord/tenants",
+  professional: "/professionals",
+};
+
 export class ContactsClient {
   constructor(private readonly http: TcHttp) {}
 
   async get(id: number, signal?: AbortSignal): Promise<TcContact | null> {
-    const one = parseJsonApiOne(await this.http.request("GET", `/contacts/${id}`, { signal }));
-    return one ? parseContact(one) : null;
+    const raw = await this.getRaw(id, signal);
+    return raw ? parseContact(raw) : null;
+  }
+
+  private async getRaw(id: number, signal?: AbortSignal): Promise<JsonApiRecord | null> {
+    const { items } = parseJsonApiList(
+      await this.http.request("GET", withQuery("/contacts", { "filter[id]": id }), { signal }),
+    );
+    return items.find((item) => item.id === id) ?? null;
   }
 
   /**
@@ -46,18 +62,29 @@ export class ContactsClient {
     return one ? parseContact(one) : null;
   }
 
+  /**
+   * Update a contact. TenantCloud has no generic contact PATCH route, so this
+   * looks up the contact's role and PATCHes the role-specific endpoint, which
+   * takes the attributes as a plain body and silently ignores a JSON:API envelope.
+   */
   async update(
     id: number,
     attributes: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<TcContact | null> {
-    const one = parseJsonApiOne(
-      await this.http.request("PATCH", `/contacts/${id}`, {
-        body: jsonApiBody(CONTACT_TYPE, attributes, id),
-        signal,
-      }),
-    );
-    return one ? parseContact(one) : null;
+    const existing = await this.getRaw(id, signal);
+    if (!existing) {
+      throw new Error(`Contact ${id} not found`);
+    }
+    const path = UPDATE_PATHS[String(existing["role"])];
+    if (!path) {
+      throw new Error(`Updating contacts with role '${String(existing["role"])}' is not supported`);
+    }
+    const updated = await this.http.request<Record<string, unknown> | null>("PATCH", `${path}/${id}`, {
+      body: attributes,
+      signal,
+    });
+    return updated ? parseContact(updated) : null;
   }
 
   async delete(id: number, signal?: AbortSignal): Promise<void> {

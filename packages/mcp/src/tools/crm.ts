@@ -34,7 +34,8 @@ export function registerCrmTools(server: McpServer, client: TcClient): void {
   server.registerTool(
     "update_contact",
     {
-      description: "Update an existing contact's fields.",
+      description:
+        "Update an existing contact's fields. Supports tenant and professional contacts (looked up by id to pick the endpoint).",
       inputSchema: {
         id: z.number().int().describe("Contact ID"),
         firstName: z.string().optional(),
